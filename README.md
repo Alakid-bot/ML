@@ -87,6 +87,9 @@ The committed `requirements.txt` lists the production runtime dependencies expli
 Zeabur installs Streamlit and the ML/database packages even if it does not install optional
 extras from `pyproject.toml`.
 
+The Zeabur start command sets `PYTHONPATH=src` because the application uses a `src/`
+package layout and runs Streamlit directly from `src/ml_project/streamlit_app.py`.
+
 If you prefer to pin the Python version explicitly, also set
 `ZBPACK_PYTHON_VERSION=3.11` in the service variables.
 

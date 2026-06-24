@@ -5,5 +5,5 @@
   "streamlit": {
     "entry": "src/ml_project/streamlit_app.py"
   },
-  "start_command": "python -m streamlit run src/ml_project/streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0"
+  "start_command": "PYTHONPATH=src python -m streamlit run src/ml_project/streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0"
 }
