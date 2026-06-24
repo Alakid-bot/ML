@@ -1,0 +1,9 @@
+{
+  "python": {
+    "version": "3.11"
+  },
+  "streamlit": {
+    "entry": "src/ml_project/streamlit_app.py"
+  },
+  "start_command": "streamlit run src/ml_project/streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0"
+}
