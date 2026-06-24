@@ -1,0 +1,4 @@
+sample_id,service_name,traffic_input_mbps,cpu_cores,ram_gb,link_capacity_mbps,cpu_utilization_percent,memory_utilization_percent,latency_ms,throughput_mbps,packet_loss_percent,max_supported_load_mbps,timestamp,latency_p95_ms,run_duration_seconds,kpi_status,notes
+1,snort,100,1,2,1000,48.5,35.2,12.4,95.0,0.0,150,2026-06-24T15:00:00Z,18.0,60,pass,example low load run
+2,snort,200,2,4,1000,72.8,45.0,20.3,180.0,0.5,230,2026-06-24T15:05:00Z,35.2,60,pass,example medium load run
+3,snort,300,2,4,1000,88.1,57.4,45.6,260.0,2.1,280,2026-06-24T15:10:00Z,80.5,60,fail,example high load run
