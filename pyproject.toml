@@ -13,12 +13,17 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "scikit-learn>=1.5",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
+]
+ui = [
+    "streamlit>=1.36",
 ]
 
 [tool.setuptools.packages.find]
