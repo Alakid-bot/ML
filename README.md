@@ -10,10 +10,16 @@ source .venv/bin/activate
 python -m pip install -e .[dev]
 ```
 
-To run the Streamlit dashboard, install the UI extras:
+For production-style installation, Zeabur can install the explicit runtime dependencies from:
+
+```text
+requirements.txt
+```
+
+To run the Streamlit dashboard locally, install the editable package:
 
 ```bash
-python -m pip install -e .[ui]
+python -m pip install -e .[dev]
 ```
 
 ## Run Tests
@@ -75,7 +81,11 @@ and a persistent volume for artifacts.
    - `ARTIFACT_ROOT` = `/data/training_runs`
 4. Mount a persistent volume at `/data` so models and datasets survive restarts.
 5. Deploy. Zeabur reads `zbpack.json`, uses Python 3.11, and starts Streamlit on
-   the assigned `$PORT`.
+    the assigned `$PORT`.
+
+The committed `requirements.txt` lists the production runtime dependencies explicitly so
+Zeabur installs Streamlit and the ML/database packages even if it does not install optional
+extras from `pyproject.toml`.
 
 If you prefer to pin the Python version explicitly, also set
 `ZBPACK_PYTHON_VERSION=3.11` in the service variables.
