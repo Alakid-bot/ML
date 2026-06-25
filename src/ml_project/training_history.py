@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -86,7 +86,7 @@ class HistoryStore:
             sklearn_version=result.sklearn_version,
             created_at=datetime.now(UTC),
             metrics_json=json.dumps(
-                [metric.__dict__ if hasattr(metric, "__dict__") else metric for metric in result.metrics],
+                [asdict(metric) for metric in result.metrics],
                 allow_nan=False,
             ),
             current=False,
@@ -129,6 +129,12 @@ class HistoryStore:
 
     def metrics(self, run: TrainingRun) -> list[dict[str, Any]]:
         return json.loads(run.metrics_json)
+
+    def report(self, run: TrainingRun) -> dict[str, Any]:
+        metrics_path = Path(run.metrics_path)
+        if metrics_path.exists():
+            return json.loads(metrics_path.read_text(encoding="utf-8"))
+        return {"metrics": self.metrics(run)}
 
     def close(self) -> None:
         self.engine.dispose()

@@ -7,6 +7,9 @@ from uuid import uuid4
 from ml_project.train import TrainingResult
 
 DEFAULT_ARTIFACT_ROOT = Path("artifacts/streamlit_runs")
+DATASET_FILENAME = "uploaded_dataset.csv"
+MODEL_FILENAME = "load_predictor.joblib"
+METRICS_FILENAME = "metrics.json"
 
 
 def artifact_root() -> Path:
@@ -25,9 +28,9 @@ def make_run_dir(run_id: str | None = None) -> Path:
 
 def artifact_paths(run_dir: Path) -> dict[str, Path]:
     return {
-        "dataset": run_dir / "uploaded_dataset.csv",
-        "model": run_dir / "load_predictor.joblib",
-        "metrics": run_dir / "metrics.json",
+        "dataset": run_dir / DATASET_FILENAME,
+        "model": run_dir / MODEL_FILENAME,
+        "metrics": run_dir / METRICS_FILENAME,
     }
 
 
@@ -50,13 +53,14 @@ def delete_run_artifacts(run_dir: Path) -> None:
     target.rmdir()
 
 
-def resolve_artifacts_from_result(result: TrainingResult) -> dict[str, Path]:
+def resolve_artifacts_from_result(result: TrainingResult) -> dict[str, Path | str]:
     model_path = Path(result.model_path)
     run_dir = model_path.parent
+    paths = artifact_paths(run_dir)
     return {
-        "dataset": run_dir / "uploaded_dataset.csv",
+        "dataset": paths["dataset"],
         "model": model_path,
-        "metrics": run_dir / "metrics.json",
+        "metrics": paths["metrics"],
         "run_dir": run_dir,
         "run_id": run_dir.name,
     }

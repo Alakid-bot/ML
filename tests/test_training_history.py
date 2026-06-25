@@ -2,42 +2,12 @@ import tempfile
 from pathlib import Path
 
 import joblib
-import pandas as pd
 import pytest
 
-from ml_project.artifacts import artifact_paths, make_run_dir
-from ml_project.train import FEATURE_COLUMNS, TARGET_COLUMN, TrainingResult, train
+from factories import make_dataset
+from ml_project.artifacts import artifact_paths, delete_run_artifacts, make_run_dir, resolve_artifacts_from_result
+from ml_project.train import FEATURE_COLUMNS, TARGET_COLUMN, ModelMetrics, TrainingResult, train
 from ml_project.training_history import HistoryStore, RunSummary
-
-
-def make_dataset(row_count: int = 30) -> pd.DataFrame:
-    rows = []
-    for index in range(row_count):
-        traffic = 100 + index * 10
-        cpu_cores = 1 + index % 4
-        ram_gb = 2 + (index % 3) * 2
-        link_capacity = 1000
-        cpu_utilization = min(95.0, 35 + traffic / 10 - cpu_cores * 4)
-        memory_utilization = min(90.0, 30 + ram_gb * 3 + index % 5)
-        latency = 10 + traffic / 50 + max(0, cpu_utilization - 70) * 0.8
-        throughput = traffic * (1 - min(0.1, index / 1000))
-        packet_loss = max(0.0, (latency - 35) / 100)
-        max_supported_load = traffic + cpu_cores * 45 + ram_gb * 8 - latency * 1.5
-        rows.append(
-            {
-                "traffic_input_mbps": traffic,
-                "cpu_cores": cpu_cores,
-                "ram_gb": ram_gb,
-                "link_capacity_mbps": link_capacity,
-                "cpu_utilization_percent": cpu_utilization,
-                "memory_utilization_percent": memory_utilization,
-                "latency_ms": latency,
-                "throughput_mbps": throughput,
-                "packet_loss_percent": packet_loss,
-                "max_supported_load_mbps": max_supported_load,
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 @pytest.fixture
@@ -120,6 +90,97 @@ def test_create_from_training_result_records_metadata_and_paths(
     loaded = history_store.get(run.id)
     assert loaded is not None
     assert loaded.dataset_filename == "dataset.csv"
+
+
+def test_resolve_artifacts_preserves_result_model_path() -> None:
+    run_dir = Path("artifacts") / "run-1"
+    custom_model_path = run_dir / "custom-model.joblib"
+    result = TrainingResult(
+        selected_model="ridge",
+        metrics=[],
+        feature_columns=FEATURE_COLUMNS,
+        target_column=TARGET_COLUMN,
+        row_count=10,
+        train_rows=8,
+        test_rows=2,
+        test_size=0.2,
+        random_state=42,
+        created_at="2026-01-01T00:00:00Z",
+        sklearn_version="1.5.0",
+        model_path=str(custom_model_path),
+    )
+
+    resolved = resolve_artifacts_from_result(result)
+
+    assert resolved["model"] == custom_model_path
+    assert resolved["dataset"] == artifact_paths(run_dir)["dataset"]
+    assert resolved["metrics"] == artifact_paths(run_dir)["metrics"]
+    assert resolved["run_dir"] == run_dir
+    assert resolved["run_id"] == "run-1"
+
+
+def test_delete_run_artifacts_refuses_path_outside_artifact_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(ValueError, match="outside artifact root"):
+        delete_run_artifacts(outside)
+
+
+def test_report_reads_full_metrics_json(
+    isolated_artifact_root: Path,
+    history_store: HistoryStore,
+) -> None:
+    df = make_dataset(80)
+    run_dir = make_run_dir()
+    paths = artifact_paths(run_dir)
+    df.to_csv(paths["dataset"], index=False)
+
+    result = train(
+        dataset_path=paths["dataset"],
+        output_dir=run_dir,
+        model_names=["ridge", "adaptive_hybrid"],
+        test_size=0.2,
+        random_state=42,
+        cv_folds=2,
+    )
+
+    run = history_store.create_from_result(
+        result,
+        artifact_dir=run_dir,
+        dataset_filename="dataset.csv",
+        dataset_path=paths["dataset"],
+    )
+    report = history_store.report(run)
+
+    assert report["selected_model"] == result.selected_model
+    assert "model_metadata" in report
+    assert "candidate_model_metadata" in report
+    assert "adaptive_hybrid" in report["candidate_model_metadata"]
+    assert report["candidate_model_metadata"]["adaptive_hybrid"]["model_type"] == "AdaptiveLoadPredictor"
+    assert len(report["cross_validation"]) == 2
+
+
+def test_report_falls_back_to_stored_metrics(history_store: HistoryStore) -> None:
+    run_dir = make_run_dir()
+    result = TrainingResult(
+        selected_model="ridge",
+        metrics=[ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5)],
+        feature_columns=FEATURE_COLUMNS,
+        target_column=TARGET_COLUMN,
+        row_count=10,
+        train_rows=8,
+        test_rows=2,
+        test_size=0.2,
+        random_state=42,
+        created_at="2026-01-01T00:00:00Z",
+        sklearn_version="1.5.0",
+        model_path=str(run_dir / "load_predictor.joblib"),
+    )
+    joblib.dump("model", result.model_path)
+    run = history_store.create_from_result(result, artifact_dir=run_dir)
+
+    assert history_store.report(run) == {"metrics": history_store.metrics(run)}
 
 
 def test_list_runs_returns_newest_first(history_store: HistoryStore) -> None:
@@ -241,8 +302,8 @@ def test_run_summary_finds_best_metric_and_builds_label(history_store: HistorySt
     result = TrainingResult(
         selected_model="ridge",
         metrics=[
-            {"model_name": "dummy_mean", "mae": 2.0, "rmse": 3.0, "r2": None},
-            {"model_name": "ridge", "mae": 1.0, "rmse": 2.0, "r2": 0.5},
+            ModelMetrics(model_name="dummy_mean", mae=2.0, rmse=3.0, r2=None),
+            ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5),
         ],
         feature_columns=FEATURE_COLUMNS,
         target_column=TARGET_COLUMN,
