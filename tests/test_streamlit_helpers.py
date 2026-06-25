@@ -6,13 +6,17 @@ from ml_project.i18n import Language
 from ml_project.streamlit_helpers import (
     feature_correlations,
     format_metric_rows,
+    metric_chart_frame,
+    metric_rank_frame,
     parse_csv,
     prepare_downloads,
+    selected_model_names,
+    selection_rationale,
     summarize_dataset,
     target_distribution,
     validate_frontend_dataset,
 )
-from ml_project.train import FEATURE_COLUMNS, TARGET_COLUMN, ModelMetrics, TrainingResult
+from ml_project.train import DEFAULT_MODELS, FEATURE_COLUMNS, TARGET_COLUMN, ModelMetrics, TrainingResult
 
 
 def make_dataset(row_count: int = 30) -> pd.DataFrame:
@@ -117,6 +121,59 @@ def test_format_metric_rows_handles_none_r2() -> None:
     metrics = [ModelMetrics(model_name="dummy_mean", mae=1.0, rmse=2.0, r2=None)]
     rows = format_metric_rows(metrics, Language.EN)
     assert rows[0]["R²"] == "n/a"
+
+
+def test_selected_model_names_defaults_when_empty() -> None:
+    assert selected_model_names([]) == DEFAULT_MODELS
+    assert selected_model_names(None) == DEFAULT_MODELS
+
+
+def test_selected_model_names_filters_unknown_values() -> None:
+    assert selected_model_names(["ridge", "unknown", "adaptive_hybrid"]) == [
+        "ridge",
+        "adaptive_hybrid",
+    ]
+
+
+def test_metric_chart_frame_uses_friendly_model_names() -> None:
+    metrics = [ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5)]
+    chart = metric_chart_frame(metrics, Language.EN)
+    assert chart.loc[0, "model"] == "Ridge regression"
+    assert chart.loc[0, "RMSE"] == 2.0
+
+
+def test_metric_rank_frame_sorts_by_rmse() -> None:
+    metrics = [
+        ModelMetrics(model_name="mlp", mae=3.0, rmse=5.0, r2=0.1),
+        ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5),
+    ]
+    ranked = metric_rank_frame(metrics, Language.EN)
+    assert ranked.loc[0, "Model"] == "Ridge regression"
+    assert ranked.loc[0, "Rank"] == 1
+
+
+def test_selection_rationale_explains_rmse_choice() -> None:
+    result = TrainingResult(
+        selected_model="ridge",
+        metrics=[
+            ModelMetrics(model_name="dummy_mean", mae=3.0, rmse=5.0, r2=0.1),
+            ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5),
+        ],
+        feature_columns=FEATURE_COLUMNS,
+        target_column=TARGET_COLUMN,
+        row_count=10,
+        train_rows=8,
+        test_rows=2,
+        test_size=0.2,
+        random_state=42,
+        created_at="2026-01-01T00:00:00Z",
+        sklearn_version="1.5.0",
+        model_path="load_predictor.joblib",
+    )
+
+    rationale = selection_rationale(result, Language.EN)
+    assert "lowest validation RMSE" in rationale
+    assert "2.0000" in rationale
 
 
 def test_target_distribution_returns_target_column() -> None:
