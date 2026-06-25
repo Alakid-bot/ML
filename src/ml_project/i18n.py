@@ -64,6 +64,12 @@ _LABELS: dict[str, dict[str, str]] = {
         "history_download_dataset": "Download dataset",
         "history_download_metrics": "Download metrics",
         "history_details": "Run details",
+        "model_label_dummy_mean": "Dummy baseline",
+        "model_label_ridge": "Ridge regression",
+        "model_label_mlp": "MLP neural network",
+        "model_label_adaptive_hybrid": "Adaptive hybrid load predictor",
+        "model_strategy": "Model strategy",
+        "residual_enabled": "Residual correction",
     },
     "zh": {
         "app_title": "网络服务负载预测",
@@ -119,6 +125,12 @@ _LABELS: dict[str, dict[str, str]] = {
         "history_download_dataset": "下载数据集",
         "history_download_metrics": "下载指标",
         "history_details": "运行详情",
+        "model_label_dummy_mean": "均值基线模型",
+        "model_label_ridge": "Ridge 岭回归模型",
+        "model_label_mlp": "MLP 神经网络模型",
+        "model_label_adaptive_hybrid": "自适应混合负载预测模型",
+        "model_strategy": "模型策略",
+        "residual_enabled": "残差修正",
     },
 }
 

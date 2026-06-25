@@ -17,6 +17,7 @@ from ml_project.streamlit_helpers import (
     summarize_dataset,
     target_distribution,
     validate_frontend_dataset,
+    model_label,
 )
 from ml_project.train import DEFAULT_MODELS, TARGET_COLUMN, train
 from ml_project.training_history import HistoryStore, RunSummary
@@ -236,7 +237,19 @@ def render_results() -> None:
     st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
     st.header(t("results_header", lang))
     st.success(f"{t('training_complete', lang)}: {result.created_at}")
-    st.metric(t("selected_model", lang), result.selected_model)
+    st.metric(t("selected_model", lang), model_label(result.selected_model, lang))
+
+    metadata = result.model_metadata
+    if metadata:
+        strategy = metadata.get("strategy")
+        residual_enabled = metadata.get("residual_enabled")
+        if strategy:
+            st.caption(f"{t('model_strategy', lang)}: {strategy}")
+        if residual_enabled is not None:
+            st.caption(
+                f"{t('residual_enabled', lang)}: "
+                f"{t('yes', lang) if residual_enabled else t('no', lang)}"
+            )
 
     st.subheader(t("metrics_header", lang))
     rows = format_metric_rows(result.metrics, lang)
@@ -298,7 +311,7 @@ def render_history() -> None:
             best = summary.best_metric()
             rmse = best.get("rmse") if best else None
             mae = best.get("mae") if best else None
-            summary_parts = [f"{t('selected_model', lang)}: {run.selected_model}"]
+            summary_parts = [f"{t('selected_model', lang)}: {model_label(run.selected_model, lang)}"]
             if run.row_count:
                 summary_parts.append(f"{t('overview_rows', lang)}: {run.row_count}")
             if rmse is not None and mae is not None:
@@ -357,6 +370,7 @@ def render_history() -> None:
                             "id": run.id,
                             "created_at": run.created_at.isoformat(),
                             "selected_model": run.selected_model,
+                            "selected_model_label": model_label(run.selected_model, lang),
                             "dataset_filename": run.dataset_filename,
                             "row_count": run.row_count,
                             "train_rows": run.train_rows,

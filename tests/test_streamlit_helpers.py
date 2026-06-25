@@ -108,7 +108,7 @@ def test_validate_frontend_dataset_allows_small_dataset_when_flagged() -> None:
 def test_format_metric_rows_localizes_headers() -> None:
     metrics = [ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5)]
     rows = format_metric_rows(metrics, Language.ZH)
-    assert rows[0]["模型"] == "ridge"
+    assert rows[0]["模型"] == "Ridge 岭回归模型"
     assert rows[0]["平均绝对误差"] == "1.0000"
     assert rows[0]["决定系数"] == "0.5000"
 

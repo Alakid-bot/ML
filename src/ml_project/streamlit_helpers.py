@@ -68,13 +68,17 @@ def format_metric_rows(metrics: list, lang: Language | str) -> list[dict[str, st
     for metric in metrics:
         rows.append(
             {
-                t("model_name", lang): metric.model_name,
+                t("model_name", lang): model_label(metric.model_name, lang),
                 t("mae", lang): f"{metric.mae:.4f}",
                 t("rmse", lang): f"{metric.rmse:.4f}",
                 t("r2", lang): format_optional_metric(metric.r2),
             }
         )
     return rows
+
+
+def model_label(model_name: str, lang: Language | str) -> str:
+    return t(f"model_label_{model_name}", lang)
 
 
 def prepare_downloads(result: TrainingResult) -> tuple[bytes, bytes]:
