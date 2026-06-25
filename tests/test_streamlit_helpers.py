@@ -137,9 +137,9 @@ def test_adaptive_diagnostic_rows_formats_metadata() -> None:
 
     rows = adaptive_diagnostic_rows(metadata, Language.ZH)
 
-    assert rows[0]["诊断项"] == "残差门控原因"
+    assert rows[0]["诊断项"] == "启用判断结果"
     assert rows[0]["值"] == "insufficient_improvement"
-    assert {row["诊断项"] for row in rows} >= {"Ridge 主干 RMSE", "混合模型验证 RMSE"}
+    assert {row["诊断项"] for row in rows} >= {"仅使用 Ridge 的 RMSE", "组合模型验证 RMSE"}
     assert {row["值"] for row in rows} >= {"2.0000", "1.9000"}
 
 
