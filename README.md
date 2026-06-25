@@ -1,6 +1,18 @@
 # ML-based Network Service Load Prediction
 
+<p align="center">
+  <a href="#english-version"><strong>English</strong></a>
+  &nbsp;|&nbsp;
+  <a href="#中文版本"><strong>中文</strong></a>
+</p>
+
+---
+
+## English Version
+
 This project provides a bilingual machine-learning dashboard for predicting the maximum supported load of network services. It combines a practical training pipeline, a Streamlit web interface, training-history persistence, and Zeabur deployment support.
+
+## 中文版本
 
 本项目是一个面向网络服务最大可支持负载预测的双语机器学习系统。它包含训练 pipeline、Streamlit 前端界面、训练历史持久化，以及 Zeabur 部署配置。
 
