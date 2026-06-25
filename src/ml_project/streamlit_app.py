@@ -12,8 +12,12 @@ from ml_project.i18n import Language, supported_languages, t
 from ml_project.streamlit_helpers import (
     feature_correlations,
     format_metric_rows,
+    metric_chart_frame,
+    metric_rank_frame,
     parse_csv,
     prepare_downloads,
+    selected_model_names,
+    selection_rationale,
     summarize_dataset,
     target_distribution,
     validate_frontend_dataset,
@@ -55,7 +59,7 @@ def run_validation(df: pd.DataFrame, allow_small: bool) -> None:
     st.session_state["validation_message"] = message
 
 
-def run_training(df: pd.DataFrame, allow_small: bool) -> None:
+def run_training(df: pd.DataFrame, allow_small: bool, model_names: list[str]) -> None:
     from ml_project.artifacts import delete_run_artifacts
 
     st.session_state["training_error"] = ""
@@ -71,7 +75,7 @@ def run_training(df: pd.DataFrame, allow_small: bool) -> None:
         result = train(
             dataset_path=dataset_path,
             output_dir=run_dir,
-            model_names=DEFAULT_MODELS,
+            model_names=model_names,
             test_size=0.2,
             random_state=42,
             allow_small_dataset=allow_small,
@@ -220,9 +224,21 @@ def render_training() -> None:
     st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
     st.header(t("train_header", lang))
 
+    selected_models = st.multiselect(
+        t("model_selection_label", lang),
+        options=DEFAULT_MODELS,
+        default=DEFAULT_MODELS,
+        format_func=lambda value: model_label(value, lang),
+        help=t("model_selection_help", lang),
+        key="model_selection",
+    )
+    model_names = selected_model_names(selected_models)
+    if not selected_models:
+        st.warning(t("model_selection_warning", lang))
+
     if st.button(t("train_button", lang), key="train_button", type="primary"):
         with st.spinner(t("training_running", lang)):
-            run_training(df, st.session_state.get("smoke_mode", False))
+            run_training(df, st.session_state.get("smoke_mode", False), model_names)
 
     if st.session_state.get("training_error"):
         st.error(f"{t('error_train', lang)} {st.session_state['training_error']}")
@@ -255,6 +271,19 @@ def render_results() -> None:
     rows = format_metric_rows(result.metrics, lang)
     metrics_df = pd.DataFrame(rows)
     st.dataframe(metrics_df, use_container_width=True)
+
+    chart_df = metric_chart_frame(result.metrics, lang)
+    if not chart_df.empty:
+        st.caption(t("metric_chart_help", lang))
+        st.subheader(t("metrics_bar_header", lang))
+        st.bar_chart(chart_df.set_index("model")[["MAE", "RMSE"]])
+
+        rank_df = metric_rank_frame(result.metrics, lang)
+        st.subheader(t("metrics_line_header", lang))
+        st.line_chart(rank_df.set_index(t("rank", lang))[t("rmse", lang)])
+
+    st.subheader(t("selection_rationale_header", lang))
+    st.info(selection_rationale(result, lang))
 
 
 def render_downloads() -> None:
