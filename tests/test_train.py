@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from ml_project.train import (
+    DEFAULT_MODELS,
     FEATURE_COLUMNS,
     TARGET_COLUMN,
     build_model,
@@ -77,11 +78,17 @@ def test_validate_dataset_rejects_small_dataset_without_override() -> None:
 
 
 def test_build_model_supports_candidate_models() -> None:
-    for model_name in ["dummy_mean", "ridge", "mlp"]:
+    for model_name in DEFAULT_MODELS:
         model = build_model(model_name, random_state=42)
 
         assert hasattr(model, "fit")
         assert hasattr(model, "predict")
+
+
+def test_build_model_disables_mlp_early_stopping_for_tiny_demo_data() -> None:
+    model = build_model("mlp", random_state=42, row_count=3)
+
+    assert model[-1].early_stopping is False
 
 
 def test_train_writes_model_and_metrics(tmp_path: Path) -> None:
@@ -109,3 +116,39 @@ def test_train_writes_model_and_metrics(tmp_path: Path) -> None:
     predictions = model.predict(make_dataset(row_count=2)[FEATURE_COLUMNS])
 
     assert predictions.shape == (2,)
+
+
+def test_train_supports_adaptive_hybrid_model(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset.csv"
+    output_dir = tmp_path / "artifacts"
+    write_dataset(dataset_path, make_dataset(row_count=80))
+
+    result = train(
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        model_names=["adaptive_hybrid"],
+        test_size=0.2,
+        random_state=42,
+    )
+
+    assert result.selected_model == "adaptive_hybrid"
+    assert result.model_metadata["model_type"] == "AdaptiveLoadPredictor"
+    assert "strategy" in result.model_metadata
+
+
+def test_train_default_models_support_tiny_demo_dataset(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset.csv"
+    output_dir = tmp_path / "artifacts"
+    write_dataset(dataset_path, make_dataset(row_count=3))
+
+    result = train(
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        model_names=DEFAULT_MODELS,
+        test_size=0.2,
+        random_state=42,
+        allow_small_dataset=True,
+    )
+
+    assert {metric.model_name for metric in result.metrics} == set(DEFAULT_MODELS)
+    assert Path(result.model_path).exists()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
@@ -21,6 +21,8 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from ml_project.adaptive_model import AdaptiveLoadPredictor
+
 
 FEATURE_COLUMNS = [
     "traffic_input_mbps",
@@ -35,7 +37,7 @@ FEATURE_COLUMNS = [
 ]
 
 TARGET_COLUMN = "max_supported_load_mbps"
-DEFAULT_MODELS = ["dummy_mean", "ridge", "mlp"]
+DEFAULT_MODELS = ["dummy_mean", "ridge", "mlp", "adaptive_hybrid"]
 MIN_ROWS = 20
 
 
@@ -65,6 +67,7 @@ class TrainingResult:
     created_at: str
     sklearn_version: str
     model_path: str
+    model_metadata: dict[str, object] = field(default_factory=dict)
 
 
 def load_dataset(path: Path) -> pd.DataFrame:
@@ -107,7 +110,7 @@ def validate_dataset(df: pd.DataFrame, *, allow_small_dataset: bool = False) -> 
         raise ValueError(f"Target column must contain at least two distinct values: {TARGET_COLUMN}")
 
 
-def build_model(model_name: str, *, random_state: int) -> Pipeline:
+def build_model(model_name: str, *, random_state: int, row_count: int | None = None) -> Pipeline:
     """Build a candidate model pipeline by name."""
     if model_name == "dummy_mean":
         return make_pipeline(DummyRegressor(strategy="mean"))
@@ -116,6 +119,7 @@ def build_model(model_name: str, *, random_state: int) -> Pipeline:
         return make_pipeline(StandardScaler(), Ridge(alpha=1.0, random_state=random_state))
 
     if model_name == "mlp":
+        use_early_stopping = row_count is None or row_count >= MIN_ROWS
         return make_pipeline(
             StandardScaler(),
             MLPRegressor(
@@ -123,13 +127,28 @@ def build_model(model_name: str, *, random_state: int) -> Pipeline:
                 activation="relu",
                 solver="adam",
                 alpha=1e-4,
-                early_stopping=True,
+                early_stopping=use_early_stopping,
                 max_iter=1000,
                 random_state=random_state,
             ),
         )
 
+    if model_name == "adaptive_hybrid":
+        return make_pipeline(
+            StandardScaler(),
+            AdaptiveLoadPredictor(random_state=random_state),
+        )
+
     raise ValueError(f"Unsupported model '{model_name}'. Choose from: {DEFAULT_MODELS}")
+
+
+def extract_model_metadata(model: Pipeline) -> dict[str, object]:
+    """Extract optional metadata from the final estimator in a fitted pipeline."""
+    final_estimator = model.steps[-1][1]
+    metadata_method = getattr(final_estimator, "model_metadata", None)
+    if callable(metadata_method):
+        return metadata_method()
+    return {"model_type": type(final_estimator).__name__}
 
 
 def evaluate_model(model_name: str, y_true: pd.Series, predictions: object) -> ModelMetrics:
@@ -165,7 +184,7 @@ def train_candidates(
     metrics: list[ModelMetrics] = []
 
     for model_name in model_names:
-        model = build_model(model_name, random_state=random_state)
+        model = build_model(model_name, random_state=random_state, row_count=len(df))
         model.fit(X_train, y_train)
         predictions = model.predict(X_test)
 
@@ -215,6 +234,7 @@ def train(
         created_at=datetime.now(UTC).isoformat(),
         sklearn_version=sklearn.__version__,
         model_path=str(model_path),
+        model_metadata=extract_model_metadata(best_model),
     )
 
     metrics_payload = asdict(result)
