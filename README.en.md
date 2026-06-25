@@ -93,7 +93,18 @@ The prediction formula is conceptually:
 final_prediction = ridge_prediction + residual_weight * mlp_residual_prediction
 ```
 
-In practice, the model first validates whether the residual correction improves RMSE. If it does not, the final model falls back to Ridge. This gives the model better compatibility across small demo datasets and larger real profiling datasets.
+In practice, the model first validates whether the residual correction improves RMSE. The final MLP residual is enabled only when the backbone RMSE, hybrid RMSE, and relative improvement are finite and the improvement reaches the `min_improvement` gate. Otherwise, the final model falls back to Ridge. This gives the model better compatibility across small demo datasets and larger real profiling datasets.
+
+`metrics.json` records residual gate diagnostics so you can see why residual correction was enabled or disabled:
+
+```text
+residual_gate_reason    improvement_met / insufficient_improvement / non_finite_metric / insufficient_samples
+residual_improvement    Relative validation RMSE improvement, or null when it cannot be computed safely
+min_improvement         Minimum improvement required to enable residual correction
+validation_size         Internal validation fraction used by the residual gate
+training_rows           Rows used for residual-gate training, or total rows for small-dataset fallback
+validation_rows         Rows used for residual-gate validation; 0 for small-dataset fallback
+```
 
 ## Model Artifact
 
@@ -189,6 +200,17 @@ python -m ml_project.train \
   --output-dir artifacts
 ```
 
+To add K-fold cross-validation metrics to the report, pass `--cv-folds`:
+
+```bash
+python -m ml_project.train \
+  --data data/profiling_dataset.csv \
+  --output-dir artifacts \
+  --cv-folds 5
+```
+
+Cross-validation is report-only: per-model K-fold MAE/RMSE/R² means and standard deviations are written to the `cross_validation` field in `metrics.json`, but the default holdout validation split still selects the saved model. `--cv-folds` must be at least 2 and cannot exceed the dataset row count.
+
 ## Streamlit Dashboard
 
 Run locally:
@@ -230,14 +252,29 @@ The `zbpack.json` start command sets `PYTHONPATH=src` because this project uses 
 ## Project Layout
 
 ```text
-data/                         CSV template and future datasets
-docs/                         Dataset schema documentation
-src/ml_project/adaptive_model.py       Adaptive hybrid model
-src/ml_project/train.py                Training pipeline
-src/ml_project/streamlit_app.py        Bilingual Streamlit dashboard
-src/ml_project/training_history.py     SQLite/PostgreSQL training history
-tests/                        Test suite
-requirements.txt              Runtime dependencies for Zeabur
-zbpack.json                   Zeabur build/start configuration
-.env.example                  Environment variable template
+data/                              CSV template and future datasets
+docs/                              Dataset schema documentation
+src/ml_project/
+  schema.py                        Shared schema constants (features, target, candidate models)
+  dataset.py                       Dataset loading and validation
+  model_factory.py                 Candidate model factory (build_model)
+  evaluation.py                    Model evaluation and K-fold cross-validation
+  pipeline.py                      Core training pipeline orchestration
+  adaptive_model.py                Adaptive hybrid model
+  training_types.py                Training result and metric dataclasses
+  train.py                         Compatibility facade and CLI entry point
+  artifacts.py                     Artifact paths and run directory management
+  training_history.py              SQLite/PostgreSQL training history
+  streamlit_helpers.py             UI helper compatibility facade
+  ui/                              Streamlit helper implementations (dataframe, downloads, formatting)
+  streamlit_app.py                 Bilingual Streamlit dashboard
+  i18n.py                          English/Chinese translations
+tests/
+  factories.py                     Shared test dataset factory
+  test_*.py                        Test suite
+requirements.txt                   Runtime dependencies for Zeabur
+zbpack.json                        Zeabur build/start configuration
+.env.example                       Environment variable template
 ```
+
+`train.py` and `streamlit_helpers.py` are compatibility facades that re-export the implementations in `schema`, `dataset`, `model_factory`, `evaluation`, `pipeline`, and `ui/`, keeping the original import paths working. CLI training runs via `python -m ml_project.train`.

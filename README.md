@@ -93,7 +93,18 @@ MLP 残差修正：学习 Ridge 没有捕捉到的非线性误差
 final_prediction = ridge_prediction + residual_weight * mlp_residual_prediction
 ```
 
-实际训练时，模型会先验证残差修正是否能降低 RMSE。如果没有提升，就自动回退到 Ridge。这样既能兼容小型演示数据，也能在真实数据较多时利用神经网络学习非线性规律。
+实际训练时，模型会先验证残差修正是否能降低 RMSE。只有当主干 RMSE、混合 RMSE 和相对提升都是有限数值，并且提升达到 `min_improvement` 门槛时，才会启用最终的 MLP 残差修正；否则自动回退到 Ridge。这样既能兼容小型演示数据，也能在真实数据较多时利用神经网络学习非线性规律。
+
+`metrics.json` 中会记录残差门控诊断字段，便于判断为什么启用或关闭残差修正：
+
+```text
+residual_gate_reason    improvement_met / insufficient_improvement / non_finite_metric / insufficient_samples
+residual_improvement    验证集上相对 RMSE 提升；无法安全计算时为 null
+min_improvement         启用残差修正所需的最小提升
+validation_size         残差门控使用的内部验证集比例
+training_rows           残差门控训练行数，或小数据回退时的总训练行数
+validation_rows         残差门控验证行数；小数据回退时为 0
+```
 
 ## 模型文件如何使用
 
@@ -189,6 +200,17 @@ python -m ml_project.train \
   --output-dir artifacts
 ```
 
+如果希望额外查看 K 折交叉验证指标，可以添加 `--cv-folds`：
+
+```bash
+python -m ml_project.train \
+  --data data/profiling_dataset.csv \
+  --output-dir artifacts \
+  --cv-folds 5
+```
+
+交叉验证是 report-only：它只把每个模型的 K 折 MAE/RMSE/R² 均值和标准差汇总写入 `metrics.json` 的 `cross_validation` 字段，不会替代默认 holdout 验证集，也不会改变最终保存模型的选择逻辑。`--cv-folds` 必须至少为 2，且不能超过数据行数。
+
 ## Streamlit 前端界面
 
 本地运行：
@@ -230,14 +252,29 @@ ARTIFACT_ROOT=/data/training_runs
 ## 项目结构
 
 ```text
-data/                         CSV 模板和未来数据集
-docs/                         数据集 schema 文档
-src/ml_project/adaptive_model.py       Adaptive Hybrid 模型
-src/ml_project/train.py                训练 pipeline
-src/ml_project/streamlit_app.py        双语 Streamlit 前端
-src/ml_project/training_history.py     SQLite/PostgreSQL 训练历史
-tests/                        测试套件
-requirements.txt              Zeabur 运行时依赖
-zbpack.json                   Zeabur 构建/启动配置
-.env.example                  环境变量模板
+data/                              CSV 模板和未来数据集
+docs/                              数据集 schema 文档
+src/ml_project/
+  schema.py                        共享 schema 常量（特征列、目标列、候选模型）
+  dataset.py                       数据集加载与校验
+  model_factory.py                 候选模型工厂（build_model）
+  evaluation.py                    模型评估与 K 折交叉验证
+  pipeline.py                      训练 pipeline 核心编排
+  adaptive_model.py                Adaptive Hybrid 模型
+  training_types.py                训练结果与指标数据类
+  train.py                         兼容 facade 与命令行入口
+  artifacts.py                     artifact 路径与 run 目录管理
+  training_history.py              SQLite/PostgreSQL 训练历史
+  streamlit_helpers.py             UI helper 兼容 facade
+  ui/                              Streamlit helper 实现（dataframe、downloads、formatting）
+  streamlit_app.py                 双语 Streamlit 前端
+  i18n.py                          中英文翻译
+tests/
+  factories.py                     共享测试数据工厂
+  test_*.py                        测试套件
+requirements.txt                   Zeabur 运行时依赖
+zbpack.json                        Zeabur 构建/启动配置
+.env.example                       环境变量模板
 ```
+
+`train.py` 与 `streamlit_helpers.py` 是兼容 facade，把 `schema`/`dataset`/`model_factory`/`evaluation`/`pipeline` 与 `ui/` 下的实现重新导出，保持旧的导入路径可用。命令行训练通过 `python -m ml_project.train` 调用。
