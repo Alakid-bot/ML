@@ -35,6 +35,17 @@ class AdaptiveLoadPredictor(RegressorMixin, BaseEstimator):
         self.mlp_max_iter = mlp_max_iter
         self.random_state = random_state
 
+    def _make_residual_model(self) -> MLPRegressor:
+        return MLPRegressor(
+            hidden_layer_sizes=self.mlp_hidden_layer_sizes,
+            activation="relu",
+            solver="adam",
+            alpha=self.mlp_alpha,
+            early_stopping=True,
+            max_iter=self.mlp_max_iter,
+            random_state=self.random_state,
+        )
+
     def fit(self, X: object, y: object) -> "AdaptiveLoadPredictor":
         X_checked, y_checked = check_X_y(X, y, y_numeric=True)
         self.n_features_in_ = X_checked.shape[1]
@@ -44,10 +55,15 @@ class AdaptiveLoadPredictor(RegressorMixin, BaseEstimator):
         self.residual_enabled_ = False
         self.backbone_rmse_ = None
         self.hybrid_rmse_ = None
+        self.residual_improvement_ = None
+        self.residual_gate_reason_ = "not_evaluated"
+        self.validation_rows_ = 0
+        self.training_rows_ = len(X_checked)
 
         if len(X_checked) < self.min_samples_for_residual:
             self.backbone_.fit(X_checked, y_checked)
             self.selected_strategy_ = "ridge_backbone_small_dataset"
+            self.residual_gate_reason_ = "insufficient_samples"
             return self
 
         X_train, X_valid, y_train, y_valid = train_test_split(
@@ -56,20 +72,14 @@ class AdaptiveLoadPredictor(RegressorMixin, BaseEstimator):
             test_size=self.validation_size,
             random_state=self.random_state,
         )
+        self.training_rows_ = len(X_train)
+        self.validation_rows_ = len(X_valid)
 
         self.backbone_.fit(X_train, y_train)
         train_backbone_pred = self.backbone_.predict(X_train)
         residual_target = y_train - train_backbone_pred
 
-        candidate_residual = MLPRegressor(
-            hidden_layer_sizes=self.mlp_hidden_layer_sizes,
-            activation="relu",
-            solver="adam",
-            alpha=self.mlp_alpha,
-            early_stopping=True,
-            max_iter=self.mlp_max_iter,
-            random_state=self.random_state,
-        )
+        candidate_residual = self._make_residual_model()
         candidate_residual.fit(X_train, residual_target)
 
         backbone_valid_pred = self.backbone_.predict(X_valid)
@@ -81,21 +91,28 @@ class AdaptiveLoadPredictor(RegressorMixin, BaseEstimator):
         self.backbone_rmse_ = backbone_rmse
         self.hybrid_rmse_ = hybrid_rmse
 
-        improvement = (backbone_rmse - hybrid_rmse) / backbone_rmse if backbone_rmse > 0 else 0.0
-        self.residual_enabled_ = improvement >= self.min_improvement
+        improvement = (
+            (backbone_rmse - hybrid_rmse) / backbone_rmse
+            if np.isfinite(backbone_rmse) and backbone_rmse > 0 and np.isfinite(hybrid_rmse)
+            else np.nan
+        )
+        self.residual_improvement_ = float(improvement) if np.isfinite(improvement) else None
+
+        metrics_are_finite = all(
+            np.isfinite(value) for value in (backbone_rmse, hybrid_rmse, improvement, self.min_improvement)
+        )
+        self.residual_enabled_ = bool(metrics_are_finite and improvement >= self.min_improvement)
+        if self.residual_enabled_:
+            self.residual_gate_reason_ = "improvement_met"
+        elif not metrics_are_finite:
+            self.residual_gate_reason_ = "non_finite_metric"
+        else:
+            self.residual_gate_reason_ = "insufficient_improvement"
 
         self.backbone_.fit(X_checked, y_checked)
         if self.residual_enabled_:
             full_residual_target = y_checked - self.backbone_.predict(X_checked)
-            self.residual_model_ = MLPRegressor(
-                hidden_layer_sizes=self.mlp_hidden_layer_sizes,
-                activation="relu",
-                solver="adam",
-                alpha=self.mlp_alpha,
-                early_stopping=True,
-                max_iter=self.mlp_max_iter,
-                random_state=self.random_state,
-            )
+            self.residual_model_ = self._make_residual_model()
             self.residual_model_.fit(X_checked, full_residual_target)
             self.selected_strategy_ = "ridge_plus_mlp_residual"
         else:
@@ -125,4 +142,10 @@ class AdaptiveLoadPredictor(RegressorMixin, BaseEstimator):
             "residual_model": "MLPRegressor",
             "backbone_rmse": self.backbone_rmse_,
             "hybrid_rmse": self.hybrid_rmse_,
+            "residual_gate_reason": self.residual_gate_reason_,
+            "residual_improvement": self.residual_improvement_,
+            "min_improvement": self.min_improvement,
+            "validation_size": self.validation_size,
+            "training_rows": self.training_rows_,
+            "validation_rows": self.validation_rows_,
         }

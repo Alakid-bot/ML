@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import joblib
 import pandas as pd
@@ -42,7 +43,21 @@ def test_adaptive_model_fits_and_predicts() -> None:
     predictions = model.predict(X.head(5))
 
     assert predictions.shape == (5,)
-    assert model.model_metadata()["model_type"] == "AdaptiveLoadPredictor"
+    metadata = model.model_metadata()
+    assert metadata["model_type"] == "AdaptiveLoadPredictor"
+    assert metadata["residual_gate_reason"] in {
+        "improvement_met",
+        "insufficient_improvement",
+        "non_finite_metric",
+    }
+    assert metadata["min_improvement"] == 0.01
+    assert metadata["validation_size"] == 0.2
+    training_rows = cast(int, metadata["training_rows"])
+    validation_rows = cast(int, metadata["validation_rows"])
+    assert training_rows + validation_rows == len(X)
+    assert validation_rows > 0
+    if metadata["residual_enabled"]:
+        assert cast(float, metadata["residual_improvement"]) >= cast(float, metadata["min_improvement"])
 
 
 def test_adaptive_model_falls_back_on_small_dataset() -> None:
@@ -54,6 +69,26 @@ def test_adaptive_model_falls_back_on_small_dataset() -> None:
     metadata = model.model_metadata()
     assert metadata["residual_enabled"] is False
     assert metadata["strategy"] == "ridge_backbone_small_dataset"
+    assert metadata["residual_gate_reason"] == "insufficient_samples"
+    assert metadata["residual_improvement"] is None
+    assert metadata["training_rows"] == len(X)
+    assert metadata["validation_rows"] == 0
+
+
+def test_adaptive_model_disables_residual_when_improvement_below_gate() -> None:
+    X, y = make_regression_frame()
+    model = AdaptiveLoadPredictor(
+        random_state=42,
+        min_samples_for_residual=30,
+        min_improvement=1.0,
+    )
+
+    model.fit(X, y)
+
+    metadata = model.model_metadata()
+    assert metadata["residual_enabled"] is False
+    assert metadata["residual_gate_reason"] == "insufficient_improvement"
+    assert metadata["residual_improvement"] is not None
 
 
 def test_adaptive_model_is_joblib_serializable(tmp_path: Path) -> None:
