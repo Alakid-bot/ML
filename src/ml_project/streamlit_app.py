@@ -7,9 +7,11 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from ml_project.artifacts import artifact_paths, make_run_dir
+from ml_project.artifacts import artifact_paths, delete_run_artifacts, make_run_dir
 from ml_project.i18n import Language, supported_languages, t
 from ml_project.streamlit_helpers import (
+    adaptive_candidate_metadata,
+    adaptive_diagnostic_rows,
     feature_correlations,
     format_metric_rows,
     metric_chart_frame,
@@ -18,16 +20,14 @@ from ml_project.streamlit_helpers import (
     prepare_downloads,
     selected_model_names,
     selection_rationale,
+    model_label,
     summarize_dataset,
     target_distribution,
     validate_frontend_dataset,
-    model_label,
 )
 from ml_project.train import DEFAULT_MODELS, TARGET_COLUMN, train
 from ml_project.training_history import HistoryStore, RunSummary
 from ml_project.ui_config import inject_custom_css
-
-TRAINING_OUTPUT_DIR = Path("artifacts/streamlit")
 
 
 def initialize_session() -> None:
@@ -60,8 +60,6 @@ def run_validation(df: pd.DataFrame, allow_small: bool) -> None:
 
 
 def run_training(df: pd.DataFrame, allow_small: bool, model_names: list[str]) -> None:
-    from ml_project.artifacts import delete_run_artifacts
-
     st.session_state["training_error"] = ""
     st.session_state["training_result"] = None
 
@@ -266,6 +264,10 @@ def render_results() -> None:
                 f"{t('residual_enabled', lang)}: "
                 f"{t('yes', lang) if residual_enabled else t('no', lang)}"
             )
+    diagnostic_rows = adaptive_diagnostic_rows(adaptive_candidate_metadata(result), lang)
+    if diagnostic_rows:
+        st.subheader(t("adaptive_diagnostics_header", lang))
+        st.dataframe(pd.DataFrame(diagnostic_rows), use_container_width=True)
 
     st.subheader(t("metrics_header", lang))
     rows = format_metric_rows(result.metrics, lang)
@@ -393,6 +395,7 @@ def render_history() -> None:
 
                 view_id = st.session_state.get("history_view_run_id")
                 if view_id == run.id:
+                    report = store.report(run)
                     st.subheader(t("history_details", lang))
                     st.json(
                         {
@@ -409,6 +412,9 @@ def render_history() -> None:
                             "sklearn_version": run.sklearn_version,
                             "current": run.current,
                             "metrics": summary.metrics,
+                            "model_metadata": report.get("model_metadata", {}),
+                            "candidate_model_metadata": report.get("candidate_model_metadata", {}),
+                            "cross_validation": report.get("cross_validation", []),
                         }
                     )
 

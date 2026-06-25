@@ -1,9 +1,10 @@
 from pathlib import Path
 
-import pandas as pd
-
+from factories import make_dataset
 from ml_project.i18n import Language
 from ml_project.streamlit_helpers import (
+    adaptive_candidate_metadata,
+    adaptive_diagnostic_rows,
     feature_correlations,
     format_metric_rows,
     metric_chart_frame,
@@ -19,34 +20,34 @@ from ml_project.streamlit_helpers import (
 from ml_project.train import DEFAULT_MODELS, FEATURE_COLUMNS, TARGET_COLUMN, ModelMetrics, TrainingResult
 
 
-def make_dataset(row_count: int = 30) -> pd.DataFrame:
-    rows = []
-    for index in range(row_count):
-        traffic = 100 + index * 10
-        cpu_cores = 1 + index % 4
-        ram_gb = 2 + (index % 3) * 2
-        link_capacity = 1000
-        cpu_utilization = min(95.0, 35 + traffic / 10 - cpu_cores * 4)
-        memory_utilization = min(90.0, 30 + ram_gb * 3 + index % 5)
-        latency = 10 + traffic / 50 + max(0, cpu_utilization - 70) * 0.8
-        throughput = traffic * (1 - min(0.1, index / 1000))
-        packet_loss = max(0.0, (latency - 35) / 100)
-        max_supported_load = traffic + cpu_cores * 45 + ram_gb * 8 - latency * 1.5
-        rows.append(
-            {
-                "traffic_input_mbps": traffic,
-                "cpu_cores": cpu_cores,
-                "ram_gb": ram_gb,
-                "link_capacity_mbps": link_capacity,
-                "cpu_utilization_percent": cpu_utilization,
-                "memory_utilization_percent": memory_utilization,
-                "latency_ms": latency,
-                "throughput_mbps": throughput,
-                "packet_loss_percent": packet_loss,
-                "max_supported_load_mbps": max_supported_load,
-            }
-        )
-    return pd.DataFrame(rows)
+def test_streamlit_helpers_facade_preserves_public_imports() -> None:
+    from ml_project import streamlit_helpers as facade
+
+    assert facade.parse_csv is parse_csv
+    assert facade.summarize_dataset is summarize_dataset
+    assert facade.validate_frontend_dataset is validate_frontend_dataset
+    assert facade.target_distribution is target_distribution
+    assert facade.feature_correlations is feature_correlations
+    assert facade.format_metric_rows is format_metric_rows
+    assert facade.selected_model_names is selected_model_names
+    assert facade.metric_chart_frame is metric_chart_frame
+    assert facade.metric_rank_frame is metric_rank_frame
+    assert facade.selection_rationale is selection_rationale
+    assert facade.adaptive_diagnostic_rows is adaptive_diagnostic_rows
+    assert facade.adaptive_candidate_metadata is adaptive_candidate_metadata
+    assert facade.prepare_downloads is prepare_downloads
+
+
+def test_streamlit_helper_split_modules_expose_public_helpers() -> None:
+    from ml_project.ui.dataframe_helpers import parse_csv as parse_csv_from_module
+    from ml_project.ui.downloads import prepare_downloads as prepare_downloads_from_module
+    from ml_project.ui.formatting import model_label as model_label_from_module
+    from ml_project.ui.formatting import selected_model_names as selected_names_from_module
+
+    assert parse_csv_from_module is parse_csv
+    assert prepare_downloads_from_module is prepare_downloads
+    assert selected_names_from_module is selected_model_names
+    assert model_label_from_module("ridge", Language.EN) == "Ridge regression"
 
 
 def test_parse_csv_with_valid_bytes() -> None:
@@ -121,6 +122,54 @@ def test_format_metric_rows_handles_none_r2() -> None:
     metrics = [ModelMetrics(model_name="dummy_mean", mae=1.0, rmse=2.0, r2=None)]
     rows = format_metric_rows(metrics, Language.EN)
     assert rows[0]["R²"] == "n/a"
+
+
+def test_adaptive_diagnostic_rows_formats_metadata() -> None:
+    metadata = {
+        "residual_gate_reason": "insufficient_improvement",
+        "backbone_rmse": 2.0,
+        "hybrid_rmse": 1.9,
+        "residual_improvement": 0.05,
+        "min_improvement": 0.01,
+        "training_rows": 64,
+        "validation_rows": 16,
+    }
+
+    rows = adaptive_diagnostic_rows(metadata, Language.ZH)
+
+    assert rows[0]["诊断项"] == "残差门控原因"
+    assert rows[0]["值"] == "insufficient_improvement"
+    assert {row["诊断项"] for row in rows} >= {"Ridge 主干 RMSE", "混合模型验证 RMSE"}
+    assert {row["值"] for row in rows} >= {"2.0000", "1.9000"}
+
+
+def test_adaptive_candidate_metadata_uses_non_selected_candidate() -> None:
+    result = TrainingResult(
+        selected_model="ridge",
+        metrics=[ModelMetrics(model_name="ridge", mae=1.0, rmse=2.0, r2=0.5)],
+        feature_columns=FEATURE_COLUMNS,
+        target_column=TARGET_COLUMN,
+        row_count=80,
+        train_rows=64,
+        test_rows=16,
+        test_size=0.2,
+        random_state=42,
+        created_at="2026-01-01T00:00:00Z",
+        sklearn_version="1.5.0",
+        model_path="load_predictor.joblib",
+        model_metadata={"model_type": "Ridge"},
+        candidate_model_metadata={
+            "adaptive_hybrid": {
+                "model_type": "AdaptiveLoadPredictor",
+                "residual_gate_reason": "insufficient_improvement",
+            }
+        },
+    )
+
+    metadata = adaptive_candidate_metadata(result)
+
+    assert metadata["model_type"] == "AdaptiveLoadPredictor"
+    assert metadata["residual_gate_reason"] == "insufficient_improvement"
 
 
 def test_selected_model_names_defaults_when_empty() -> None:
