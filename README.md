@@ -79,31 +79,25 @@ adaptive_hybrid   自适应混合负载预测模型
 
 本项目的专属优化模型是 `adaptive_hybrid`。
 
-它结合了 Ridge 和 MLP 的优点：
+它采用两步训练方式：
 
 ```text
-Ridge 主干：学习稳定的主要趋势
-MLP 残差修正：学习 Ridge 没有捕捉到的非线性误差
-自动回退：当数据太少或验证集没有提升时，自动关闭残差修正
+Ridge 基础模型：先学习稳定的主要关系
+MLP 补充模型：再学习 Ridge 仍然预测不准的部分
+自动回退：当数据太少或验证集没有明确提升时，只使用 Ridge
 ```
 
-核心思想可以理解为：
+训练时，系统会先比较“只用 Ridge”和“Ridge 加 MLP 补充”在验证集上的 RMSE。只有当两个 RMSE 都能正常计算，并且组合后的 RMSE 至少达到 `min_improvement` 要求时，才会启用 MLP 补充模型；否则保存更稳妥的 Ridge 模型。这样可以避免为了追求复杂模型而牺牲小数据集上的稳定性。
+
+`metrics.json` 中会记录以下诊断字段，便于汇报时说明模型为什么启用或没有启用 MLP 补充：
 
 ```text
-final_prediction = ridge_prediction + residual_weight * mlp_residual_prediction
-```
-
-实际训练时，模型会先验证残差修正是否能降低 RMSE。只有当主干 RMSE、混合 RMSE 和相对提升都是有限数值，并且提升达到 `min_improvement` 门槛时，才会启用最终的 MLP 残差修正；否则自动回退到 Ridge。这样既能兼容小型演示数据，也能在真实数据较多时利用神经网络学习非线性规律。
-
-`metrics.json` 中会记录残差门控诊断字段，便于判断为什么启用或关闭残差修正：
-
-```text
-residual_gate_reason    improvement_met / insufficient_improvement / non_finite_metric / insufficient_samples
-residual_improvement    验证集上相对 RMSE 提升；无法安全计算时为 null
-min_improvement         启用残差修正所需的最小提升
-validation_size         残差门控使用的内部验证集比例
-training_rows           残差门控训练行数，或小数据回退时的总训练行数
-validation_rows         残差门控验证行数；小数据回退时为 0
+residual_gate_reason    启用判断结果：达到要求 / 提升不足 / 指标异常 / 样本不足
+residual_improvement    组合模型相对 Ridge 的 RMSE 降低比例；无法安全计算时为 null
+min_improvement         启用 MLP 补充所需的最低改进比例
+validation_size         内部验证集比例
+training_rows           用于判断是否启用 MLP 补充的训练行数；小数据回退时为总训练行数
+validation_rows         用于判断是否启用 MLP 补充的验证行数；小数据回退时为 0
 ```
 
 ## 模型文件如何使用
@@ -156,6 +150,43 @@ print(prediction[0])
 2. ML 模型预测 max_supported_load_mbps。
 3. 优化模块比较当前流量和预测容量。
 4. 如果当前流量超过预测容量，系统可以扩容 CPU/RAM/带宽，或重新调度服务。
+```
+
+## 术语解释
+
+```text
+ML                    机器学习。这里指用历史 profiling 数据训练模型，让模型预测网络服务的最大可支持负载。
+profiling             性能采样或压测记录。每一行表示一次服务运行实验，包括资源、流量、KPI 和最大可支持负载。
+KPI                   关键性能指标。这里主要包括 CPU 使用率、内存使用率、延迟、吞吐量和丢包率。
+CSV                   逗号分隔表格文件。项目用 CSV 上传训练数据。
+schema                数据字段规范。这里指训练 CSV 必须包含哪些列，以及这些列的含义。
+feature / 特征        模型输入列，例如 CPU 核数、内存、链路容量、延迟、吞吐量和丢包率。
+target / 目标值       模型要预测的列。本项目的目标值是 max_supported_load_mbps。
+Mbps                  兆比特每秒。这里用于表示流量、吞吐量和最大可支持负载。
+GB                    吉字节。这里用于表示 RAM 内存大小。
+ms                    毫秒。这里用于表示网络延迟。
+CPU / RAM             CPU 表示处理器资源；RAM 表示内存资源。它们是预测服务负载能力的重要输入。
+Regression / 回归     预测连续数值的机器学习任务。本项目预测的是最大可支持负载，不是类别。
+validation set / 验证集 从训练数据中分出来的一部分数据，用来比较候选模型表现，并选择最终保存的模型。
+holdout               一次固定的数据划分方式。项目默认用 holdout 验证集选择最终模型。
+K-fold cross-validation / K 折交叉验证  把数据分成 K 份轮流训练和验证；本项目中它只写入报告，不改变最终模型选择。
+MAE                   平均绝对误差。表示预测值平均偏离真实值多少，越低越好。
+RMSE                  均方根误差。它对较大的预测错误更敏感，项目用它作为主要模型选择指标，越低越好。
+R²                    决定系数，用来辅助判断模型整体解释能力。越接近 1 通常表示拟合越好；数据太少时可能无法有效计算。
+Ridge                 岭回归模型。它是带 L2 正则化的线性回归，训练稳定，适合小数据和主要线性关系。
+L2 regularization / L2 正则化  一种限制模型参数过大的方法，用来降低过拟合风险，让模型更稳定。
+MLP                   多层感知机神经网络。它可以学习非线性关系，但通常需要更多数据。
+adaptive_hybrid       本项目的自适应混合模型。它先训练 Ridge，再判断是否需要启用 MLP 补充模型。
+min_improvement       启用 MLP 补充模型所需的最低 RMSE 降低比例。提升不够时，模型会保留更稳妥的 Ridge 结果。
+CLI                   命令行界面。这里指通过 python -m ml_project.train 运行训练。
+Streamlit             用 Python 构建网页应用的框架。本项目用它提供上传数据、训练模型、查看结果的前端界面。
+artifact              训练后生成并保存的文件，例如模型文件、指标 JSON 和上传的数据集副本。
+joblib                Python 模型保存工具。项目用 .joblib 文件保存训练好的 scikit-learn Pipeline。
+Pipeline              scikit-learn 的流水线对象。本项目的 Pipeline 同时包含特征标准化和最终模型。
+JSON                  一种结构化文本格式。项目用 metrics.json 保存训练指标和诊断信息。
+SQLite / PostgreSQL   数据库。SQLite 用于本地默认训练历史；PostgreSQL 用于 Zeabur 部署环境。
+Zeabur                云部署平台。项目提供 Zeabur 配置，用于部署 Streamlit 应用和持久化训练文件。
+facade                兼容门面模块。这里指 train.py 和 streamlit_helpers.py 继续保留旧导入路径，但内部实现已经拆到更清晰的模块。
 ```
 
 ## 本地环境

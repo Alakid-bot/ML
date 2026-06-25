@@ -79,31 +79,25 @@ adaptive_hybrid   Adaptive hybrid load predictor
 
 The dedicated optimized model is `adaptive_hybrid`.
 
-It combines the advantages of Ridge and MLP:
+It uses a two-step training design:
 
 ```text
-Ridge backbone: learns the stable main trend
-MLP residual correction: learns nonlinear error left by Ridge
-Automatic fallback: disables residual correction when data is too small or validation does not improve
+Ridge base model: learns the stable main relationship first
+MLP supplementary model: learns the part Ridge still predicts inaccurately
+Automatic fallback: uses Ridge only when the dataset is too small or validation does not clearly improve
 ```
 
-The prediction formula is conceptually:
+During training, the system compares validation RMSE from “Ridge only” and “Ridge plus MLP supplement”. The MLP supplement is enabled only when both RMSE values are valid and the combined model improves by at least `min_improvement`. Otherwise, the saved model uses the more stable Ridge result. This prevents the training process from choosing a more complex model when the validation evidence is not strong enough.
+
+`metrics.json` records these diagnostic fields so reports can explain why the MLP supplement was or was not enabled:
 
 ```text
-final_prediction = ridge_prediction + residual_weight * mlp_residual_prediction
-```
-
-In practice, the model first validates whether the residual correction improves RMSE. The final MLP residual is enabled only when the backbone RMSE, hybrid RMSE, and relative improvement are finite and the improvement reaches the `min_improvement` gate. Otherwise, the final model falls back to Ridge. This gives the model better compatibility across small demo datasets and larger real profiling datasets.
-
-`metrics.json` records residual gate diagnostics so you can see why residual correction was enabled or disabled:
-
-```text
-residual_gate_reason    improvement_met / insufficient_improvement / non_finite_metric / insufficient_samples
-residual_improvement    Relative validation RMSE improvement, or null when it cannot be computed safely
-min_improvement         Minimum improvement required to enable residual correction
-validation_size         Internal validation fraction used by the residual gate
-training_rows           Rows used for residual-gate training, or total rows for small-dataset fallback
-validation_rows         Rows used for residual-gate validation; 0 for small-dataset fallback
+residual_gate_reason    Enablement result: requirement met / improvement too small / invalid metric / not enough samples
+residual_improvement    RMSE reduction ratio versus Ridge; null when it cannot be computed safely
+min_improvement         Minimum improvement ratio required to enable the MLP supplement
+validation_size         Internal validation-set fraction
+training_rows           Training rows used for the enablement check, or total rows for small-dataset fallback
+validation_rows         Validation rows used for the enablement check; 0 for small-dataset fallback
 ```
 
 ## Model Artifact
@@ -156,6 +150,43 @@ The model can support the optimization/orchestration phase:
 2. ML model predicts max_supported_load_mbps.
 3. Optimizer compares current traffic with predicted capacity.
 4. If traffic exceeds predicted capacity, the system can scale CPU/RAM/bandwidth or reschedule services.
+```
+
+## Glossary
+
+```text
+ML                    Machine Learning. Here it means training a model from profiling data to predict maximum supported service load.
+profiling             Performance sampling or load-test records. Each row represents one service run with resources, traffic, KPI metrics, and supported load.
+KPI                   Key Performance Indicator. Here it mainly covers CPU usage, memory usage, latency, throughput, and packet loss.
+CSV                   Comma-Separated Values, a simple table file format. The project uses CSV files for uploaded training datasets.
+schema                The required data-field specification. Here it defines which CSV columns must exist and what they mean.
+feature               A model input column, such as CPU cores, RAM, link capacity, latency, throughput, or packet loss.
+target                The value the model predicts. In this project, the target is max_supported_load_mbps.
+Mbps                  Megabits per second. It is used for traffic, throughput, and maximum supported load.
+GB                    Gigabyte. It is used for RAM size.
+ms                    Millisecond. It is used for network latency.
+CPU / RAM             CPU is processor resource; RAM is memory resource. Both are important inputs for predicting service capacity.
+regression            A machine-learning task that predicts a continuous number. This project predicts supported load, not a category.
+validation set        A subset of training data used to compare candidate models and select the saved model.
+holdout               A single fixed train/validation split. The project uses holdout validation to select the final saved model.
+K-fold cross-validation  A stability check that splits data into K parts and rotates training/validation; here it is report-only.
+MAE                   Mean Absolute Error. It shows the average absolute prediction error. Lower is better.
+RMSE                  Root Mean Squared Error. It penalizes larger prediction errors more strongly and is the main model-selection metric. Lower is better.
+R²                    Coefficient of determination. It helps describe overall fit; values closer to 1 usually indicate better fit. With very small data, it may be undefined.
+Ridge                 Ridge regression. It is linear regression with L2 regularization, stable for smaller datasets and mainly linear relationships.
+L2 regularization     A method that discourages overly large model parameters, reducing overfitting risk and improving stability.
+MLP                   Multi-Layer Perceptron, a neural-network model. It can learn nonlinear patterns but usually needs more data.
+adaptive_hybrid       The project-specific adaptive hybrid model. It trains Ridge first, then decides whether to enable the MLP supplement.
+min_improvement       The minimum RMSE reduction ratio required to enable the MLP supplement. If improvement is too small, the model keeps the more stable Ridge result.
+CLI                   Command Line Interface. Here it means running training through python -m ml_project.train.
+Streamlit             A Python framework for web apps. This project uses it for dataset upload, model training, and result display.
+artifact              A file generated by training, such as the saved model, metrics JSON, or uploaded dataset copy.
+joblib                A Python model-saving tool. The project uses .joblib files to save trained scikit-learn Pipelines.
+Pipeline              A scikit-learn pipeline object. In this project, it includes feature scaling and the selected model.
+JSON                  A structured text format. The project uses metrics.json for training metrics and diagnostics.
+SQLite / PostgreSQL   Databases. SQLite is the local default for training history; PostgreSQL is used for Zeabur deployment.
+Zeabur                A cloud deployment platform. The project includes Zeabur settings for deploying the Streamlit app and preserving training files.
+facade                A compatibility wrapper module. Here, train.py and streamlit_helpers.py keep old import paths while implementation lives in clearer modules.
 ```
 
 ## Local Setup
